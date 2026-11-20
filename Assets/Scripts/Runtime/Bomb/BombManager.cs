@@ -284,6 +284,8 @@ public class BombManager : MonoBehaviour
 
         usedQuestions.Add(selectedQuestion);
         correctColor = puzzleLibrary[selectedQuestion];
+        PlayerPrefs.SetString("BombCorrectColor", correctColor);
+        PlayerPrefs.Save();
 
         instructionText.color = Color.white;
         instructionText.text = selectedQuestion;
