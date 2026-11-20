@@ -16,6 +16,18 @@ public class VirtualRoomController : MonoBehaviour
     [Header("Fase 6 - Spatial Audio")]
     [SerializeField] private AudioSource bombAudio;
 
+    [Header("Fase 7 - Mengambil Tang")]
+    [SerializeField] private Transform holdPoint;
+    [SerializeField] private Transform pliers;
+    [SerializeField] private GameObject pickupButton;
+    [SerializeField] private GameObject crosshair;
+    [SerializeField] private float pickupDistance = 2.2f;
+
+    [Header("Fase 8 - Memilih Kabel")]
+    [SerializeField] private Transform cableRoot;
+    [SerializeField] private Renderer[] cableRenderers;
+    [SerializeField] private float cableAimDistance = 3.5f;
+
     private const float JoystickRadius = 70f;
     private Vector2 moveInput;
     private Vector2 moveTouchStart;
@@ -26,7 +38,11 @@ public class VirtualRoomController : MonoBehaviour
     private int moveTouchId = -1;
     private int lookTouchId = -1;
     private bool enabledEnhancedTouch;
+    private bool hasPliers;
     private AudioClip beepClip;
+    private Color[] cableBaseColors;
+    private Renderer highlightedCable;
+    private MaterialPropertyBlock cablePropertyBlock;
 
     private void Awake()
     {
@@ -34,6 +50,13 @@ public class VirtualRoomController : MonoBehaviour
         Debug.Assert(playerCamera != null, "Player Camera belum dihubungkan.", this);
         Debug.Assert(joystickHandle != null, "Joystick Handle belum dihubungkan.", this);
         Debug.Assert(bombAudio != null, "Bomb Audio belum dihubungkan.", this);
+        Debug.Assert(holdPoint != null, "Hold Point belum dihubungkan.", this);
+        Debug.Assert(pliers != null, "Tang belum dihubungkan.", this);
+        Debug.Assert(pickupButton != null, "Tombol Ambil belum dihubungkan.", this);
+        Debug.Assert(crosshair != null, "Crosshair belum dihubungkan.", this);
+        Debug.Assert(cableRoot != null, "Cable Root belum dihubungkan.", this);
+        Debug.Assert(cableRenderers != null && cableRenderers.Length == 4,
+            "Empat renderer kabel harus dihubungkan.", this);
 
         if (!EnhancedTouchSupport.enabled)
         {
@@ -50,6 +73,18 @@ public class VirtualRoomController : MonoBehaviour
             bombAudio.maxDistance = 15f;
             bombAudio.dopplerLevel = 0f;
         }
+
+        cablePropertyBlock = new MaterialPropertyBlock();
+        cableBaseColors = new Color[cableRenderers.Length];
+        for (int i = 0; i < cableRenderers.Length; i++)
+        {
+            Debug.Assert(cableRenderers[i] != null,
+                "Renderer kabel indeks " + i + " belum dihubungkan.", this);
+            cableBaseColors[i] = cableRenderers[i].sharedMaterial.GetColor("_BaseColor");
+        }
+
+        pickupButton.SetActive(false);
+        crosshair.SetActive(false);
     }
 
     private void OnDestroy()
@@ -67,6 +102,7 @@ public class VirtualRoomController : MonoBehaviour
         ReadEditorInput();
         MovePlayer();
         PlayBeep();
+        UpdateInteraction();
     }
 
     private void ReadTouchInput()
@@ -175,6 +211,89 @@ public class VirtualRoomController : MonoBehaviour
 
         bombAudio.PlayOneShot(beepClip, 0.85f);
         nextBeepTime = Time.time + 0.9f;
+    }
+
+    public void TakePliers()
+    {
+        if (hasPliers || Vector3.Distance(characterController.transform.position,
+                pliers.position) > pickupDistance)
+            return;
+
+        hasPliers = true;
+        pickupButton.SetActive(false);
+        crosshair.SetActive(true);
+
+        foreach (Collider pliersCollider in pliers.GetComponentsInChildren<Collider>())
+            pliersCollider.enabled = false;
+
+        pliers.SetParent(holdPoint, false);
+        pliers.localPosition = Vector3.zero;
+        pliers.localRotation = Quaternion.Euler(8f, 0f, 0f);
+        pliers.localScale = Vector3.one * 0.6f;
+    }
+
+    private void UpdateInteraction()
+    {
+        if (!hasPliers)
+        {
+            bool canPickup = Vector3.Distance(characterController.transform.position,
+                pliers.position) <= pickupDistance;
+            pickupButton.SetActive(canPickup);
+            if (canPickup && Keyboard.current != null &&
+                Keyboard.current.eKey.wasPressedThisFrame)
+                TakePliers();
+
+            SetHighlightedCable(null);
+            return;
+        }
+
+        Ray aimRay = new Ray(playerCamera.transform.position,
+            playerCamera.transform.forward);
+        if (Physics.Raycast(aimRay, out RaycastHit hit, cableAimDistance,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) &&
+            hit.transform.IsChildOf(cableRoot))
+        {
+            SetHighlightedCable(hit.collider.GetComponent<Renderer>());
+            return;
+        }
+
+        SetHighlightedCable(null);
+    }
+
+    private void SetHighlightedCable(Renderer cable)
+    {
+        if (highlightedCable == cable)
+            return;
+
+        if (highlightedCable != null)
+            ApplyCableColor(highlightedCable,
+                cableBaseColors[FindCableIndex(highlightedCable)]);
+
+        highlightedCable = cable;
+        if (highlightedCable != null)
+        {
+            int cableIndex = FindCableIndex(highlightedCable);
+            ApplyCableColor(highlightedCable,
+                Color.Lerp(cableBaseColors[cableIndex], Color.white, 0.7f));
+        }
+    }
+
+    private int FindCableIndex(Renderer cable)
+    {
+        for (int i = 0; i < cableRenderers.Length; i++)
+        {
+            if (cableRenderers[i] == cable)
+                return i;
+        }
+
+        return 0;
+    }
+
+    private void ApplyCableColor(Renderer cable, Color color)
+    {
+        cable.GetPropertyBlock(cablePropertyBlock);
+        cablePropertyBlock.SetColor("_BaseColor", color);
+        cable.SetPropertyBlock(cablePropertyBlock);
     }
 
     private bool PointerOverUi(int pointerId)
