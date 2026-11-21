@@ -407,7 +407,7 @@ MonoBehaviour:
     center: {x: 0.5, y: 0.8}
     size: {x: 0.2, y: 0.15}
     childName: Tombol_Merah
-    sizeMeters: {x: 0.025, y: 0.025}
+    sizeMeters: {x: 0.05, y: 0.05}
     onPressed:
       m_PersistentCalls:
         m_Calls: []
@@ -418,7 +418,7 @@ MonoBehaviour:
     center: {x: 0.5, y: 0.8}
     size: {x: 0.2, y: 0.15}
     childName: Tombol_Biru
-    sizeMeters: {x: 0.025, y: 0.025}
+    sizeMeters: {x: 0.05, y: 0.05}
     onPressed:
       m_PersistentCalls:
         m_Calls: []
@@ -429,7 +429,7 @@ MonoBehaviour:
     center: {x: 0.5, y: 0.8}
     size: {x: 0.2, y: 0.15}
     childName: Tombol_Hijau
-    sizeMeters: {x: 0.025, y: 0.025}
+    sizeMeters: {x: 0.05, y: 0.05}
     onPressed:
       m_PersistentCalls:
         m_Calls: []
@@ -440,22 +440,20 @@ MonoBehaviour:
     center: {x: 0.5, y: 0.8}
     size: {x: 0.2, y: 0.15}
     childName: Tombol_Kuning
-    sizeMeters: {x: 0.025, y: 0.025}
+    sizeMeters: {x: 0.05, y: 0.05}
     onPressed:
       m_PersistentCalls:
         m_Calls: []
     onReleased:
       m_PersistentCalls:
         m_Calls: []
-  pressThreshold: 0.1
-  releaseThreshold: 0.04
-  selectionMargin: 0.02
-  framesToPress: 3
-  framesToRelease: 3
-  checkInterval: 0.05
+  pressThreshold: 0.075
+  releaseThreshold: 0.035
+  framesToPress: 5
+  framesToRelease: 2
+  checkInterval: 0.06
   cooldown: 1.5
-  calibrationSamples: 20
-  movementResetPixels: 10
+  calibrationSamples: 10
   flipY: 0
   lostTrackingGrace: 1.5
   showDebug: 1

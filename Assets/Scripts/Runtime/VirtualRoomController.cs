@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -21,6 +22,7 @@ public class VirtualRoomController : MonoBehaviour
     [SerializeField] private AudioSource bombAudio;
     [SerializeField] private AudioClip bombCountdownClip;
     [SerializeField, Min(0f)] private float bombAudioStartSeconds = 5f;
+    [SerializeField, Min(0f)] private float bombExplosionTimeSeconds = 38.85f;
 
     [Header("Fase 7 - Mengambil Tang")]
     [SerializeField] private Transform holdPoint;
@@ -33,6 +35,7 @@ public class VirtualRoomController : MonoBehaviour
     [SerializeField] private Transform cableRoot;
     [SerializeField] private Renderer[] cableRenderers;
     [SerializeField] private float cableAimDistance = 3.5f;
+    [SerializeField] private TMP_Text bombClueText;
 
     [Header("Fase 9 - Memotong Kabel")]
     [SerializeField] private GameObject cutButton;
@@ -60,6 +63,10 @@ public class VirtualRoomController : MonoBehaviour
     private bool hasPliers;
     private bool gameEnded;
     private string correctCableColor;
+    private readonly List<string> remainingCableColors = new List<string>
+    {
+        "Merah", "Biru", "Hijau", "Kuning"
+    };
     private Color[] cableBaseColors;
     private Renderer highlightedCable;
     private MaterialPropertyBlock cablePropertyBlock;
@@ -77,6 +84,7 @@ public class VirtualRoomController : MonoBehaviour
         Debug.Assert(cableRoot != null, "Cable Root belum dihubungkan.", this);
         Debug.Assert(cableRenderers != null && cableRenderers.Length == 4,
             "Empat renderer kabel harus dihubungkan.", this);
+        Debug.Assert(bombClueText != null, "Teks clue bom belum dihubungkan.", this);
         Debug.Assert(cutButton != null, "Tombol Potong belum dihubungkan.", this);
         Debug.Assert(explosionAudio != null, "Explosion Audio belum dihubungkan.", this);
         Debug.Assert(resultPanel != null && resultText != null,
@@ -99,10 +107,18 @@ public class VirtualRoomController : MonoBehaviour
         if (bombAudio != null)
         {
             bombAudio.spatialBlend = 1f;
-            bombAudio.rolloffMode = AudioRolloffMode.Logarithmic;
-            bombAudio.minDistance = 0.75f;
-            bombAudio.maxDistance = 15f;
+            bombAudio.rolloffMode = AudioRolloffMode.Custom;
+            bombAudio.minDistance = 0.8f;
+            bombAudio.maxDistance = 12f;
             bombAudio.dopplerLevel = 0f;
+            bombAudio.SetCustomCurve(
+                AudioSourceCurveType.CustomRolloff,
+                new AnimationCurve(
+                    new Keyframe(0f, 1f),
+                    new Keyframe(0.2f, 0.65f),
+                    new Keyframe(0.45f, 0.25f),
+                    new Keyframe(0.75f, 0.08f),
+                    new Keyframe(1f, 0f)));
 
             if (bombCountdownClip != null)
             {
@@ -116,6 +132,11 @@ public class VirtualRoomController : MonoBehaviour
         }
 
         correctCableColor = PlayerPrefs.GetString("BombCorrectColor", "Merah");
+        if (!remainingCableColors.Contains(correctCableColor))
+            correctCableColor = "Merah";
+        remainingCableColors.Remove(correctCableColor);
+        remainingCableColors.Insert(0, correctCableColor);
+        UpdateBombClue();
 
         cablePropertyBlock = new MaterialPropertyBlock();
         cableBaseColors = new Color[cableRenderers.Length];
@@ -143,13 +164,17 @@ public class VirtualRoomController : MonoBehaviour
 
     private void Update()
     {
+        FaceClueTowardPlayer();
+
         if (gameEnded)
             return;
 
         if (bombAudio != null && bombAudio.clip != null && bombAudio.isPlaying &&
-            bombAudio.time >= bombAudio.clip.length - 3f)
+            bombAudio.time >= Mathf.Min(
+                bombExplosionTimeSeconds,
+                bombAudio.clip.length - 0.01f))
         {
-            StartCoroutine(FailureSequence("Waktu habis!", false));
+            StartCoroutine(FailureSequence(false));
             return;
         }
 
@@ -302,11 +327,37 @@ public class VirtualRoomController : MonoBehaviour
 
         Ray aimRay = new Ray(playerCamera.transform.position,
             playerCamera.transform.forward);
-        if (Physics.Raycast(aimRay, out RaycastHit hit, cableAimDistance,
-                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) &&
-            hit.transform.IsChildOf(cableRoot))
+        RaycastHit[] hits = Physics.SphereCastAll(
+            aimRay,
+            0.08f,
+            cableAimDistance,
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+        Renderer aimedCable = null;
+        float smallestAimOffset = float.MaxValue;
+        foreach (RaycastHit hit in hits)
         {
-            SetHighlightedCable(hit.collider.GetComponent<Renderer>());
+            if (!hit.transform.IsChildOf(cableRoot))
+                continue;
+
+            Renderer cable = hit.collider.GetComponent<Renderer>();
+            if (cable == null)
+                continue;
+
+            Vector3 cableOffset = cable.bounds.center - aimRay.origin;
+            float aimOffset = Vector3.Cross(
+                aimRay.direction,
+                cableOffset).magnitude;
+            if (aimOffset >= smallestAimOffset)
+                continue;
+
+            aimedCable = cable;
+            smallestAimOffset = aimOffset;
+        }
+
+        if (aimedCable != null)
+        {
+            SetHighlightedCable(aimedCable);
             cutButton.SetActive(highlightedCable != null);
 
             if (highlightedCable != null && Keyboard.current != null &&
@@ -331,11 +382,23 @@ public class VirtualRoomController : MonoBehaviour
         cutButton.SetActive(false);
         ReleaseCable(selectedCable);
 
-        if (selectedColor == correctCableColor)
+        if (selectedColor != correctCableColor)
+        {
+            StartCoroutine(FailureSequence(true));
+            return;
+        }
+
+        remainingCableColors.RemoveAt(0);
+        if (remainingCableColors.Count == 0)
+        {
+            if (bombClueText != null)
+                bombClueText.text = "SEMUA KABEL TERPUTUS";
             StartCoroutine(SuccessSequence());
-        else
-            StartCoroutine(FailureSequence(
-                "Kabel " + selectedColor + " salah!", true));
+            return;
+        }
+
+        correctCableColor = remainingCableColors[0];
+        UpdateBombClue();
     }
 
     private void ReleaseCable(Renderer cable)
@@ -363,7 +426,7 @@ public class VirtualRoomController : MonoBehaviour
         ShowModeSelection("BOMB DEFUSED", Color.green);
     }
 
-    private IEnumerator FailureSequence(string message, bool playExplosion)
+    private IEnumerator FailureSequence(bool playExplosion)
     {
         gameEnded = true;
 
@@ -373,19 +436,21 @@ public class VirtualRoomController : MonoBehaviour
             if (explosionClip != null)
             {
                 explosionAudio.clip = explosionClip;
-                explosionAudio.time = Mathf.Max(0f, explosionClip.length - 3f);
+                explosionAudio.loop = false;
+                explosionAudio.time = Mathf.Clamp(
+                    bombExplosionTimeSeconds,
+                    0f,
+                    Mathf.Max(0f, explosionClip.length - 0.01f));
                 explosionAudio.Play();
             }
         }
-
-        ShowResult("GAGAL\n" + message, Color.red);
 
         characterController.enabled = false;
         Vector3 startPosition = characterController.transform.position;
         Quaternion startRotation = playerCamera.transform.localRotation;
         Quaternion fallenRotation = Quaternion.Euler(-78f, 0f, 88f);
 
-        const float fallDuration = 1.15f;
+        const float fallDuration = 0.35f;
         float elapsed = 0f;
         while (elapsed < fallDuration)
         {
@@ -472,6 +537,36 @@ public class VirtualRoomController : MonoBehaviour
         if (objectName.Contains("Green")) return "Hijau";
         if (objectName.Contains("Yellow")) return "Kuning";
         return objectName;
+    }
+
+    private static string GetBombClue(string cableColor)
+    {
+        if (cableColor == "Merah") return "CLUE: warna darah";
+        if (cableColor == "Biru") return "CLUE: warna langit cerah";
+        if (cableColor == "Hijau") return "CLUE: warna daun";
+        if (cableColor == "Kuning") return "CLUE: warna matahari";
+        return "CLUE: " + cableColor;
+    }
+
+    private void UpdateBombClue()
+    {
+        if (bombClueText != null)
+        {
+            bombClueText.text = GetBombClue(correctCableColor) +
+                "\nSisa kabel: " + remainingCableColors.Count;
+        }
+    }
+
+    private void FaceClueTowardPlayer()
+    {
+        if (bombClueText == null || playerCamera == null)
+            return;
+
+        Vector3 direction =
+            bombClueText.transform.position - playerCamera.transform.position;
+        if (direction.sqrMagnitude > 0.001f)
+            bombClueText.transform.rotation =
+                Quaternion.LookRotation(direction.normalized, Vector3.up);
     }
 
     private void SetHighlightedCable(Renderer cable)

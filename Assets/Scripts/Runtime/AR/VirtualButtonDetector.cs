@@ -1,5 +1,4 @@
 using System;
-using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.SceneManagement;
@@ -21,7 +20,7 @@ public class VirtualButtonDetector : MonoBehaviour
         public string childName = "";
 
         [Header("Area deteksi (meter)")]
-        public Vector2 sizeMeters = new Vector2(0.025f, 0.025f);
+        public Vector2 sizeMeters = new Vector2(0.05f, 0.05f);
 
         public UnityEvent onPressed;
         public UnityEvent onReleased;
@@ -73,34 +72,26 @@ public class VirtualButtonDetector : MonoBehaviour
 
     [Header("Sensitivitas")]
     [Range(0.02f, 0.5f)]
-    public float pressThreshold = 0.1f;
+    public float pressThreshold = 0.075f;
 
     [Range(0.01f, 0.5f)]
-    public float releaseThreshold = 0.04f;
-
-    [Tooltip("Selisih minimum kandidat terkuat terhadap tombol lain. Mencegah tombol yang salah dipilih ketika beberapa area berubah hampir sama.")]
-    [Range(0f, 0.1f)]
-    public float selectionMargin = 0.02f;
+    public float releaseThreshold = 0.035f;
 
     [Min(1)]
-    public int framesToPress = 3;
+    public int framesToPress = 5;
 
     [Min(1)]
     public int framesToRelease = 2;
 
     [Min(0.03f)]
-    public float checkInterval = 0.05f;
+    public float checkInterval = 0.06f;
 
     [Tooltip("Jeda setelah tombol apa pun ditekan, sebelum tombol lain boleh terdeteksi.")]
     [Min(0f)]
     public float cooldown = 1.5f;
 
     [Min(3)]
-    public int calibrationSamples = 20;
-
-    [Tooltip("Kalibrasi diulang bila posisi marker bergeser sejauh nilai ini di layar.")]
-    [Min(1f)]
-    public float movementResetPixels = 10f;
+    public int calibrationSamples = 10;
 
     [Tooltip("Aktifkan jika sampel vertikal gambar kamera terbalik.")]
     public bool flipY = false;
@@ -116,18 +107,11 @@ public class VirtualButtonDetector : MonoBehaviour
     private const int TextureWidth = 320;
     private const int Grid = 5;
 
+    private RenderTexture renderTexture;
     private Texture2D cameraTexture;
-    private ARCameraManager cameraManager;
-    private int cameraImageWidth;
-    private int cameraImageHeight;
 
     private Color[] calibrationSums;
     private Color[] currentColors;
-
-    private Vector2 calibratedMarkerCenter;
-    private Vector2 calibratedMarkerRight;
-    private Vector2 calibratedMarkerTop;
-    private bool hasCalibratedMarkerPose;
 
     private float elapsed;
     private int calibrationCount;
@@ -162,19 +146,6 @@ public class VirtualButtonDetector : MonoBehaviour
             return;
         }
 
-        cameraManager = cameraBackground.GetComponent<ARCameraManager>();
-
-        if (cameraManager == null)
-        {
-            status = "ERROR: ARCameraManager tidak ditemukan";
-            Debug.LogError(
-                "VirtualButtonDetector: Main Camera harus memiliki ARCameraManager.",
-                this
-            );
-            enabled = false;
-            return;
-        }
-
         if (buttons == null || buttons.Length == 0)
         {
             Debug.LogError(
@@ -200,6 +171,29 @@ public class VirtualButtonDetector : MonoBehaviour
             }
         }
 
+        int height = Mathf.Max(
+            16,
+            Mathf.RoundToInt(
+                TextureWidth * (float)Screen.height / Screen.width
+            )
+        );
+
+        renderTexture = new RenderTexture(
+            TextureWidth,
+            height,
+            0,
+            RenderTextureFormat.ARGB32
+        );
+
+        renderTexture.Create();
+
+        cameraTexture = new Texture2D(
+            TextureWidth,
+            height,
+            TextureFormat.RGB24,
+            false
+        );
+
         calibrationSums = new Color[buttons.Length];
         currentColors = new Color[buttons.Length];
 
@@ -216,6 +210,12 @@ public class VirtualButtonDetector : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (renderTexture != null)
+        {
+            renderTexture.Release();
+            Destroy(renderTexture);
+        }
+
         if (cameraTexture != null)
             Destroy(cameraTexture);
     }
@@ -238,7 +238,9 @@ public class VirtualButtonDetector : MonoBehaviour
             return;
         }
 
-        if (cameraManager == null || arCamera == null)
+        if (cameraBackground == null ||
+            cameraBackground.material == null ||
+            arCamera == null)
         {
             status = "Referensi kamera tidak lengkap";
             return;
@@ -247,34 +249,14 @@ public class VirtualButtonDetector : MonoBehaviour
         bool trackingKuat =
             trackedImage.trackingState == TrackingState.Tracking;
 
-        // Jangan membuat kandidat tekanan baru ketika tracking melemah.
-        // Gerakan pose saat tracking Limited mudah terbaca sebagai perubahan
-        // warna walaupun tangan belum menekan tombol.
-        if (!trackingKuat)
+        // Kalibrasi hanya saat marker terlihat jelas.
+        if (!calibrated && !trackingKuat)
         {
-            ClearPressCandidates();
-            status = calibrated
-                ? "Tracking marker melemah. Tahan kamera tetap stabil."
-                : "Tahan kamera, marker belum stabil" + InfoTracking();
+            status = "Tahan kamera, marker belum stabil" + InfoTracking();
             return;
         }
 
-        // Baseline warna hanya valid selama tombol tetap berada di area layar
-        // yang sama. Jika marker bergeser, lakukan kalibrasi ulang agar tekstur
-        // blueprint yang berbeda tidak dianggap sebagai tangan.
-        if (calibrated && MarkerMovedFromCalibration(trackedImage))
-        {
-            ResetCalibration();
-            RecordMarkerScreenPose(trackedImage);
-            status = "Marker bergeser. Kalibrasi ulang, jangan sentuh tombol.";
-            return;
-        }
-
-        if (!CaptureCamera())
-        {
-            status = "Menunggu frame kamera HP...";
-            return;
-        }
+        CaptureCamera();
 
         // Ambil sampel pada posisi layar masing-masing tombol.
         for (int i = 0; i < buttons.Length; i++)
@@ -293,8 +275,6 @@ public class VirtualButtonDetector : MonoBehaviour
         // Kalibrasi gambar awal tanpa jari menutupi marker.
         if (!calibrated)
         {
-            RecordMarkerScreenPose(trackedImage);
-
             for (int i = 0; i < buttons.Length; i++)
                 calibrationSums[i] += currentColors[i];
 
@@ -387,7 +367,6 @@ public class VirtualButtonDetector : MonoBehaviour
         // boleh menjadi kandidat tekanan dalam satu pemeriksaan.
         int bestIndex = -1;
         float strongestDiff = pressThreshold;
-        float secondStrongestDiff = 0f;
 
         for (int i = 0; i < buttons.Length; i++)
         {
@@ -398,30 +377,9 @@ public class VirtualButtonDetector : MonoBehaviour
 
             if (button.diff > strongestDiff)
             {
-                secondStrongestDiff = strongestDiff;
                 strongestDiff = button.diff;
                 bestIndex = i;
             }
-            else if (button.diff > secondStrongestDiff)
-            {
-                secondStrongestDiff = button.diff;
-            }
-        }
-
-        // Jangan menebak bila dua tombol menghasilkan perubahan yang hampir
-        // sama. Kondisi ini biasanya terjadi karena jari menutupi batas dua
-        // tombol atau pencahayaan kamera berubah.
-        if (bestIndex >= 0 &&
-            strongestDiff - secondStrongestDiff < selectionMargin)
-        {
-            for (int i = 0; i < buttons.Length; i++)
-            {
-                if (!buttons[i].pressed)
-                    buttons[i].overCount = 0;
-            }
-
-            status = "Tekanan belum jelas. Tutupi bagian tengah satu tombol.";
-            return;
         }
 
         // Tambah hitungan hanya untuk kandidat terkuat.
@@ -480,7 +438,7 @@ public class VirtualButtonDetector : MonoBehaviour
             this
         );
 
-        if (bombManager != null && IsCableButton(selected.name))
+        if (bombManager != null)
             bombManager.SelectCable(selected.name);
 
         selected.onPressed?.Invoke();
@@ -554,138 +512,32 @@ public class VirtualButtonDetector : MonoBehaviour
         }
     }
 
-    private void ClearPressCandidates()
+    private void CaptureCamera()
     {
-        if (buttons == null)
-            return;
+        Graphics.Blit(
+            null,
+            renderTexture,
+            cameraBackground.material
+        );
 
-        foreach (ButtonDef button in buttons)
-        {
-            if (button == null || button.pressed)
-                continue;
+        RenderTexture previous = RenderTexture.active;
 
-            button.overCount = 0;
-        }
-    }
+        RenderTexture.active = renderTexture;
 
-    private bool MarkerMovedFromCalibration(ARTrackedImage trackedImage)
-    {
-        if (!hasCalibratedMarkerPose || trackedImage == null || arCamera == null)
-            return false;
+        cameraTexture.ReadPixels(
+            new Rect(
+                0,
+                0,
+                renderTexture.width,
+                renderTexture.height
+            ),
+            0,
+            0
+        );
 
-        GetMarkerScreenPose(
-            trackedImage,
-            out Vector2 center,
-            out Vector2 right,
-            out Vector2 top);
+        cameraTexture.Apply(false);
 
-        float maxMovement = Mathf.Max(
-            Vector2.Distance(center, calibratedMarkerCenter),
-            Mathf.Max(
-                Vector2.Distance(right, calibratedMarkerRight),
-                Vector2.Distance(top, calibratedMarkerTop)));
-
-        return maxMovement > movementResetPixels;
-    }
-
-    private void RecordMarkerScreenPose(ARTrackedImage trackedImage)
-    {
-        if (trackedImage == null || arCamera == null)
-            return;
-
-        GetMarkerScreenPose(
-            trackedImage,
-            out calibratedMarkerCenter,
-            out calibratedMarkerRight,
-            out calibratedMarkerTop);
-
-        hasCalibratedMarkerPose = true;
-    }
-
-    private void GetMarkerScreenPose(
-        ARTrackedImage trackedImage,
-        out Vector2 center,
-        out Vector2 right,
-        out Vector2 top)
-    {
-        Transform marker = trackedImage.transform;
-        Vector2 imageSize = trackedImage.size;
-
-        Vector3 centerScreen = arCamera.WorldToScreenPoint(marker.position);
-        Vector3 rightScreen = arCamera.WorldToScreenPoint(
-            marker.TransformPoint(new Vector3(imageSize.x * 0.5f, 0f, 0f)));
-        Vector3 topScreen = arCamera.WorldToScreenPoint(
-            marker.TransformPoint(new Vector3(0f, 0f, imageSize.y * 0.5f)));
-
-        center = new Vector2(centerScreen.x, centerScreen.y);
-        right = new Vector2(rightScreen.x, rightScreen.y);
-        top = new Vector2(topScreen.x, topScreen.y);
-    }
-
-    private bool CaptureCamera()
-    {
-        if (!cameraManager.TryAcquireLatestCpuImage(out XRCpuImage image))
-            return false;
-
-        try
-        {
-            int outputWidth = TextureWidth;
-            int outputHeight = Mathf.Max(
-                16,
-                Mathf.RoundToInt(
-                    outputWidth * (float)image.height / image.width
-                )
-            );
-
-            if (cameraTexture == null ||
-                cameraTexture.width != outputWidth ||
-                cameraTexture.height != outputHeight)
-            {
-                if (cameraTexture != null)
-                    Destroy(cameraTexture);
-
-                cameraTexture = new Texture2D(
-                    outputWidth,
-                    outputHeight,
-                    TextureFormat.RGB24,
-                    false
-                );
-            }
-
-            var conversion = new XRCpuImage.ConversionParams
-            {
-                inputRect = new RectInt(0, 0, image.width, image.height),
-                outputDimensions = new Vector2Int(outputWidth, outputHeight),
-                outputFormat = TextureFormat.RGB24,
-                transformation = XRCpuImage.Transformation.MirrorY
-            };
-
-            int dataSize = image.GetConvertedDataSize(conversion);
-            var data = new NativeArray<byte>(
-                dataSize,
-                Allocator.Temp,
-                NativeArrayOptions.UninitializedMemory
-            );
-
-            try
-            {
-                image.Convert(conversion, data);
-                cameraTexture.LoadRawTextureData(data);
-                cameraTexture.Apply(false);
-            }
-            finally
-            {
-                data.Dispose();
-            }
-
-            cameraImageWidth = image.width;
-            cameraImageHeight = image.height;
-            return true;
-        }
-        finally
-        {
-            image.Dispose();
-        }
+        RenderTexture.active = previous;
     }
 
     private bool SampleButton(
@@ -786,13 +638,11 @@ public class VirtualButtonDetector : MonoBehaviour
                 if (screenPoint.z <= 0f)
                     continue;
 
-                Vector2 cameraUv = ScreenToCameraUv(
-                    screenPoint.x / Screen.width,
-                    screenPoint.y / Screen.height
-                );
+                float nx = screenPoint.x / Screen.width;
+                float ny = screenPoint.y / Screen.height;
 
-                float nx = cameraUv.x;
-                float ny = cameraUv.y;
+                if (flipY)
+                    ny = 1f - ny;
 
                 if (nx < 0f || nx > 1f ||
                     ny < 0f || ny > 1f)
@@ -822,50 +672,6 @@ public class VirtualButtonDetector : MonoBehaviour
 
         average = sum / samples;
         return true;
-    }
-
-    private Vector2 ScreenToCameraUv(float screenX, float screenY)
-    {
-        Vector2 uv;
-
-        // CPU image dari ARCore tetap memakai orientasi sensor kamera.
-        // Ubah koordinat layar agar area yang dibaca tetap berada tepat di
-        // bawah tombol 3D pada orientasi ponsel yang sedang digunakan.
-        switch (Screen.orientation)
-        {
-            case ScreenOrientation.Portrait:
-                uv = new Vector2(screenY, 1f - screenX);
-                break;
-
-            case ScreenOrientation.PortraitUpsideDown:
-                uv = new Vector2(1f - screenY, screenX);
-                break;
-
-            case ScreenOrientation.LandscapeRight:
-                uv = new Vector2(1f - screenX, 1f - screenY);
-                break;
-
-            default:
-                uv = new Vector2(screenX, screenY);
-                break;
-        }
-
-        // Beberapa perangkat melaporkan orientasi Unknown. Gunakan rasio
-        // sensor sebagai petunjuk bila layar portrait tetapi image landscape.
-        if (Screen.orientation == ScreenOrientation.AutoRotation ||
-            Screen.orientation == ScreenOrientation.Unknown)
-        {
-            bool screenPortrait = Screen.height > Screen.width;
-            bool imageLandscape = cameraImageWidth > cameraImageHeight;
-
-            if (screenPortrait && imageLandscape)
-                uv = new Vector2(screenY, 1f - screenX);
-        }
-
-        if (flipY)
-            uv.y = 1f - uv.y;
-
-        return uv;
     }
 
     private Transform ResolveButtonTransform(
@@ -991,14 +797,6 @@ public class VirtualButtonDetector : MonoBehaviour
             Mathf.Abs(a.g - b.g) +
             Mathf.Abs(a.b - b.b)
         ) / 3f;
-    }
-
-    private static bool IsCableButton(string buttonName)
-    {
-        return string.Equals(buttonName, "Merah", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(buttonName, "Biru", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(buttonName, "Hijau", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(buttonName, "Kuning", StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnGUI()

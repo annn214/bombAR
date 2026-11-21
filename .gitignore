@@ -127,6 +127,7 @@ InitTestScene*.unity*
 /tmp/
 /.utmp/
 /Bomb_BackUpThisFolder_ButDontShipItWithYourGame/
+/*_BackUpThisFolder_ButDontShipItWithYourGame/
 
 # PDF documentation is intentionally allowed and may be committed.
 # Do not add a global *.pdf ignore rule.
