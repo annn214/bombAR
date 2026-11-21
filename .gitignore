@@ -107,3 +107,26 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# Local AI assistants, MCP, and project automation configuration
+# These directories may contain machine-specific settings, endpoints, or tokens.
+/.codex/
+/.kitwright/
+/.agents/
+/.mcp/
+/.mcp.json
+/.claude/
+/.gemini/
+/AGENTS.md
+
+# Local editor configuration
+/.vscode/
+/.idea/
+
+# Local temporary and backup folders
+/tmp/
+/.utmp/
+/Bomb_BackUpThisFolder_ButDontShipItWithYourGame/
+
+# PDF documentation is intentionally allowed and may be committed.
+# Do not add a global *.pdf ignore rule.
