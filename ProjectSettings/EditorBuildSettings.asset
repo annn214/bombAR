@@ -6,11 +6,14 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/SampleScene.unity
+    path: Assets/Scenes/Scenes/SampleScene.unity
     guid: 99c9720ab356a0642a771bea13969a05
+  - enabled: 1
+    path: Assets/Scenes/Virtual/VirtualRoom.unity
+    guid: a1d7eea2e317c68428bd23c7197b0424
   m_configObjects:
-    UnityEditor.XR.ARCore.ARCoreSettings: {fileID: 11400000, guid: bc1b4b064f30dac4193e47641c038df4, type: 2}
+    UnityEditor.XR.ARCore.ARCoreSettings: {fileID: 11400000, guid: 03e1e1f99b09bdb44bf9dd76ea215163, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-    com.unity.xr.arfoundation.simulation_settings: {fileID: 11400000, guid: 5e095fed96fc59b4db7ff6327fd996bc, type: 2}
-    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: a2b4c900de0c10b4987cc098b99dd061, type: 2}
-    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: 806bc8bdb6028584caf76161b9e8971a, type: 2}
+    com.unity.xr.arfoundation.simulation_settings: {fileID: 11400000, guid: b8a8fb7e5a3a3d4459a4b0304da214db, type: 2}
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 092998b10d453fe448991b6671ff29a1, type: 2}
+    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: 08f610a1e210aea41a345367ff17b752, type: 2}
